@@ -2,8 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const base64url = require('base64url');
-const { isoUint8Array } = require ('@simplewebauthn/server/helpers');
-
+const { isoUint8Array } = require('@simplewebauthn/server/helpers');
 
 const app = express();
 app.use(cors());
@@ -119,6 +118,68 @@ app.post('/login-verify', async (req, res) => {
       res.status(400).json({ error: 'Authentication failed' });
     }
   } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/login-options', async (req, res) => {
+  try {
+    const options = await generateAuthenticationOptions({
+      rpID,
+      // Don't specify allowCredentials to allow selection from all registered credentials
+    });
+
+    // Store the challenge for all users
+    for (const user of users.values()) {
+      user.currentChallenge = options.challenge;
+    }
+
+    res.json(options);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/login-verify-without-username', async (req, res) => {
+  try {
+    const { id, rawId, response, type } = req.body;
+
+    // Find the user based on the credential ID
+    let foundUser = null;
+    let foundCredential = null;
+    for (const [username, user] of users.entries()) {
+      if (user.credential && user.credential.credentialID === rawId) {
+        foundUser = { ...user, username };
+        foundCredential = user.credential;
+        break;
+      }
+    }
+
+    if (!foundUser || !foundCredential) {
+      return res.status(400).json({ error: 'User not found' });
+    }
+
+    const verification = await verifyAuthenticationResponse({
+      response: {
+        id,
+        rawId,
+        response,
+        type,
+      },
+      expectedChallenge: foundUser.currentChallenge,
+      expectedOrigin: origin,
+      expectedRPID: rpID,
+      authenticator: foundCredential,
+    });
+
+    if (verification.verified) {
+      currentUser = foundUser.username;
+      res.json({ success: true, username: foundUser.username });
+    } else {
+      res.status(400).json({ error: 'Authentication failed' });
+    }
+  } catch (error) {
+    console.error('Error in login-verify-without-username:', error);
     res.status(400).json({ error: error.message });
   }
 });

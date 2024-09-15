@@ -114,6 +114,43 @@ function App() {
     }
   };
 
+  const loginWithoutUsername = async () => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/login-options`);
+      const publicKey = response.data;
+
+      publicKey.challenge = base64urlToArrayBuffer(publicKey.challenge);
+      if (publicKey.allowCredentials) {
+        publicKey.allowCredentials = publicKey.allowCredentials.map(cred => ({
+          ...cred,
+          id: base64urlToArrayBuffer(cred.id),
+        }));
+      }
+
+      const credential = await navigator.credentials.get({ publicKey });
+
+      const assertionResponse = {
+        id: credential.id,
+        rawId: arrayBufferToBase64url(credential.rawId),
+        response: {
+          clientDataJSON: arrayBufferToBase64url(credential.response.clientDataJSON),
+          authenticatorData: arrayBufferToBase64url(credential.response.authenticatorData),
+          signature: arrayBufferToBase64url(credential.response.signature),
+          userHandle: credential.response.userHandle ? arrayBufferToBase64url(credential.response.userHandle) : null,
+        },
+        type: credential.type,
+      };
+
+      const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse);
+      setCurrentUser(verifyResponse.data.username);
+      toast.success('Login successful');
+    } catch (error) {
+      console.error('Error during login without username:', error);
+      const errorMessage = error.response?.data?.error || error.message || 'Login failed';
+      toast.error(`Login failed: ${errorMessage}`);
+    }
+  };
+
   const logout = async () => {
     try {
       await axios.post(`${BACKEND_URL}/logout`);
@@ -144,6 +181,7 @@ function App() {
           />
           <button onClick={register}>Register</button>
           <button onClick={login}>Login</button>
+          <button onClick={loginWithoutUsername}>Login without username</button>
         </div>
       )}
     </div>
