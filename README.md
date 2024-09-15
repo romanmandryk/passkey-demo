@@ -2,6 +2,8 @@
 
 This project demonstrates a basic implementation of passkey-based authentication using a Node.js backend and a React frontend. It allows users to register, login, and logout using passkeys (WebAuthn).
 
+![Screenshot of the Passkey Demo](client/public/screen.png)
+
 ## Project Structure
 
 - `/server`: Contains the Node.js backend code
@@ -10,9 +12,10 @@ This project demonstrates a basic implementation of passkey-based authentication
 ## Features
 
 - User registration with passkeys
-- User login with passkeys
+- User login with passkeys (with or without username)
 - User logout
 - Display of currently logged-in user
+- Modern, user-friendly interface with explanations of the passkey process
 
 ## Prerequisites
 
@@ -80,7 +83,7 @@ This project demonstrates a basic implementation of passkey-based authentication
 
 1. Open your web browser and go to `http://localhost:3000`
 2. Use the interface to register a new user with a passkey
-3. Log in using the registered passkey
+3. Log in using the registered passkey (with or without username)
 4. Log out when finished
 
 ## Note
