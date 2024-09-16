@@ -3,7 +3,7 @@ const cors = require('cors');
 const session = require('express-session');
 const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const base64url = require('base64url');
-const { initDB, getUser, createUser, getUserCredentials, getAllUsers, addCredential } = require('./db');
+const { initDB, getUser, createUser, addCredential, getUserCredentials, getAllUsers, updateCredentialUsage, deleteCredential } = require('./db');
 
 const app = express();
 
@@ -31,7 +31,11 @@ const rpID = 'localhost';
 const origin = `http://${rpID}:3000`;
 
 // Initialize the database
-initDB().then(() => {});
+initDB().then(() => {
+  
+}).catch(err => {
+  
+});
 
 app.post('/register', async (req, res, next) => {
   try {
@@ -80,7 +84,9 @@ app.post('/register-verify', async (req, res, next) => {
     });
 
     if (verification.verified) {
-      await addCredential(userId, verification.registrationInfo);
+      const deviceInfo = req.headers['user-agent'] || 'Unknown device';
+      const ipAddress = req.ip;
+      await addCredential(userId, verification.registrationInfo, deviceInfo, ipAddress);
       delete req.session.challenge;
       delete req.session.registrationUserId;
       res.json({ success: true });
@@ -159,6 +165,8 @@ app.post('/login-verify', async (req, res) => {
       req.session.currentUser = username;
       delete req.session.challenge;
       delete req.session.username;
+      const deviceInfo = req.headers['user-agent'] || 'Unknown device';
+      await updateCredentialUsage(credentialId, req.ip, deviceInfo);
       res.json({ success: true });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
@@ -194,7 +202,6 @@ app.post('/login-verify-without-username', async (req, res) => {
     for (const user of users) {
       const userCredentials = await getUserCredentials(user.id);
       foundCredential = userCredentials.find(cred => cred.credential_id === rawId);
-      console.log('foundCredential', rawId,foundCredential);
       if (foundCredential) {
         foundUser = user;
         break;
@@ -222,6 +229,10 @@ app.post('/login-verify-without-username', async (req, res) => {
     if (verification.verified) {
       req.session.currentUser = foundUser.username;
       delete req.session.challenge;
+      
+      const deviceInfo = req.headers['user-agent'] || 'Unknown device';
+      await updateCredentialUsage(foundCredential.credential_id, req.ip, deviceInfo);
+      
       res.json({ success: true, username: foundUser.username });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
@@ -264,6 +275,32 @@ app.get('/user-credentials', async (req, res) => {
     res.json(credentials);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch user credentials' });
+  }
+});
+
+app.delete('/credential/:id', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  const credentialId = req.params.id;
+  try {
+    const user = await getUser(req.session.currentUser);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userCredentials = await getUserCredentials(user.id);
+    const credentialToDelete = userCredentials.find(cred => cred.credential_id === credentialId);
+
+    if (!credentialToDelete) {
+      return res.status(403).json({ error: 'You do not have permission to delete this credential' });
+    }
+
+    await deleteCredential(credentialId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete credential' });
   }
 });
 

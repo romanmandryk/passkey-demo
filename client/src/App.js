@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useTable, useSortBy, usePagination } from 'react-table';
+import Modal from './Modal';
 import './App.css';
-import { SHA256 } from 'crypto-js';
-import base64url from 'base64url';
 
 const BACKEND_URL = 'http://localhost:3001';
 axios.defaults.withCredentials = true;
+
 // Helper function to convert base64url to ArrayBuffer
 const base64urlToArrayBuffer = (base64url) => {
   const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
@@ -26,40 +27,121 @@ const arrayBufferToBase64url = (buffer) => {
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 };
 
-
 function App() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [loginUsername, setLoginUsername] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [userCredentials, setUserCredentials] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [credentialToDelete, setCredentialToDelete] = useState(null);
 
-  useEffect(() => {
-    checkCurrentUser();
-  }, []);
-
-  useEffect(() => {
-    if (currentUser) {
-      fetchUserCredentials();
-    }
-  }, [currentUser]);
-
-  const checkCurrentUser = async () => {
+  const checkCurrentUser = useCallback(async () => {
     try {
-      const response = await axios.get(`${BACKEND_URL}/user`, { withCredentials: true });
+      const response = await axios.get(`${BACKEND_URL}/user`);
       setCurrentUser(response.data.username);
     } catch (error) {
       console.error('Error checking current user:', error);
     }
-  };
+  }, []);
 
-  const fetchUserCredentials = async () => {
+  const fetchUserCredentials = useCallback(async () => {
+    if (!currentUser) return;
     try {
-      const response = await axios.get(`${BACKEND_URL}/user-credentials`, { withCredentials: true });
+      const response = await axios.get(`${BACKEND_URL}/user-credentials`);
       setUserCredentials(response.data);
     } catch (error) {
       console.error('Error fetching user credentials:', error);
     }
-  };
+  }, [currentUser]);
+
+  useEffect(() => {
+    checkCurrentUser();
+  }, [checkCurrentUser]);
+
+  useEffect(() => {
+    fetchUserCredentials();
+  }, [fetchUserCredentials]);
+
+  const openDeleteModal = useCallback((credentialId) => {
+    setCredentialToDelete(credentialId);
+    setIsModalOpen(true);
+  }, []);
+
+  const closeDeleteModal = useCallback(() => {
+    setIsModalOpen(false);
+    setCredentialToDelete(null);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (credentialToDelete) {
+      try {
+        await axios.delete(`${BACKEND_URL}/credential/${credentialToDelete}`);
+        toast.success('Credential deleted successfully');
+        fetchUserCredentials();
+      } catch (error) {
+        console.error('Error deleting credential:', error);
+        toast.error('Failed to delete credential');
+      }
+    }
+    closeDeleteModal();
+  }, [credentialToDelete, closeDeleteModal, fetchUserCredentials]);
+
+  const columns = useMemo(
+    () => [
+      {
+        Header: 'Credential ID',
+        accessor: 'credential_id',
+        Cell: ({ value }) => value.substr(0, 16) + '...'
+      },
+      {
+        Header: 'Device',
+        accessor: 'device_info',
+      },
+      {
+        Header: 'Last Used IP',
+        accessor: 'last_used_ip',
+      },
+      {
+        Header: 'Last Used At',
+        accessor: 'last_used_at',
+        Cell: ({ value }) => new Date(value).toLocaleString()
+      },
+      {
+        Header: 'Action',
+        Cell: ({ row }) => (
+          <button onClick={() => openDeleteModal(row.original.credential_id)} className="delete-btn">
+            Delete
+          </button>
+        )
+      }
+    ],
+    [openDeleteModal]
+  );
+
+  const {
+    getTableProps,
+    getTableBodyProps,
+    headerGroups,
+    prepareRow,
+    page,
+    canPreviousPage,
+    canNextPage,
+    pageOptions,
+    pageCount,
+    gotoPage,
+    nextPage,
+    previousPage,
+    setPageSize,
+    state: { pageIndex, pageSize },
+  } = useTable(
+    {
+      columns,
+      data: userCredentials,
+      initialState: { pageIndex: 0, pageSize: 5 },
+    },
+    useSortBy,
+    usePagination
+  );
 
   const register = async () => {
     try {
@@ -81,7 +163,7 @@ function App() {
         type: credential.type,
       };
 
-      await axios.post(`${BACKEND_URL}/register-verify`, attestationResponse, { withCredentials: true });
+      await axios.post(`${BACKEND_URL}/register-verify`, attestationResponse);
       toast.success(isNewUser ? 'Registration successful' : 'New credential added successfully');
       checkCurrentUser();
     } catch (error) {
@@ -116,7 +198,7 @@ function App() {
         type: credential.type,
       };
 
-      await axios.post(`${BACKEND_URL}/login-verify`, { ...assertionResponse, username: loginUsername }, { withCredentials: true });
+      await axios.post(`${BACKEND_URL}/login-verify`, { ...assertionResponse, username: loginUsername });
       toast.success('Login successful');
       checkCurrentUser();
     } catch (error) {
@@ -153,7 +235,7 @@ function App() {
         type: credential.type,
       };
 
-      const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse, { withCredentials: true });
+      const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse);
       setCurrentUser(verifyResponse.data.username);
       toast.success('Login successful');
     } catch (error) {
@@ -165,7 +247,7 @@ function App() {
 
   const logout = async () => {
     try {
-      await axios.post(`${BACKEND_URL}/logout`, {}, { withCredentials: true });
+      await axios.post(`${BACKEND_URL}/logout`);
       setCurrentUser(null);
       setUserCredentials([]);
       toast.success('Logout successful');
@@ -184,22 +266,82 @@ function App() {
           <h2>Welcome, {currentUser}!</h2>
           <button onClick={logout}>Logout</button>
           <h3>Your Credentials</h3>
-          <table className="credentials-table">
+          <table {...getTableProps()} className="credentials-table">
             <thead>
-              <tr>
-                <th>Credential ID</th>
-                <th>Created At</th>
-              </tr>
-            </thead>
-            <tbody>
-              {userCredentials.map((cred) => (
-                <tr key={cred.id}>
-                  <td>{cred.credential_id.substr(0, 16)}...</td>
-                  <td>{new Date(cred.created_at).toLocaleString()}</td>
+              {headerGroups.map(headerGroup => (
+                <tr {...headerGroup.getHeaderGroupProps()}>
+                  {headerGroup.headers.map(column => (
+                    <th {...column.getHeaderProps(column.getSortByToggleProps())}>
+                      {column.render('Header')}
+                      <span>
+                        {column.isSorted
+                          ? column.isSortedDesc
+                            ? ' 🔽'
+                            : ' 🔼'
+                          : ''}
+                      </span>
+                    </th>
+                  ))}
                 </tr>
               ))}
+            </thead>
+            <tbody {...getTableBodyProps()}>
+              {page.map((row, i) => {
+                prepareRow(row)
+                return (
+                  <tr {...row.getRowProps()}>
+                    {row.cells.map(cell => {
+                      return <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
+                    })}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+          <div className="pagination">
+            <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
+              {'<<'}
+            </button>{' '}
+            <button onClick={() => previousPage()} disabled={!canPreviousPage}>
+              {'<'}
+            </button>{' '}
+            <button onClick={() => nextPage()} disabled={!canNextPage}>
+              {'>'}
+            </button>{' '}
+            <button onClick={() => gotoPage(pageCount - 1)} disabled={!canNextPage}>
+              {'>>'}
+            </button>{' '}
+            <span>
+              Page{' '}
+              <strong>
+                {pageIndex + 1} of {pageOptions.length}
+              </strong>{' '}
+            </span>
+            <span>
+              | Go to page:{' '}
+              <input
+                type="number"
+                defaultValue={pageIndex + 1}
+                onChange={e => {
+                  const page = e.target.value ? Number(e.target.value) - 1 : 0
+                  gotoPage(page)
+                }}
+                style={{ width: '50px' }}
+              />
+            </span>{' '}
+            <select
+              value={pageSize}
+              onChange={e => {
+                setPageSize(Number(e.target.value))
+              }}
+            >
+              {[5, 10, 20].map(pageSize => (
+                <option key={pageSize} value={pageSize}>
+                  Show {pageSize}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       ) : (
         <div className="auth-container">
@@ -253,6 +395,13 @@ function App() {
           </div>
         </div>
       )}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={closeDeleteModal}
+        onConfirm={confirmDelete}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this passkey? This will remove the passkey from the server, but it will still be kept in your passkey manager. You may need to remove it manually from your device if you no longer wish to use it."
+      />
     </div>
   );
 }

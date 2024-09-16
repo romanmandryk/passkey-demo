@@ -22,6 +22,9 @@ function initDB() {
             credential_id TEXT UNIQUE,
             public_key TEXT,
             counter INTEGER,
+            device_info TEXT,
+            last_used_ip TEXT,
+            last_used_at DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
           )`);
@@ -55,7 +58,7 @@ async function createUser(username) {
   return result.lastID;
 }
 
-async function addCredential(userId, credential) {
+function addCredential(userId, credential, deviceInfo, ipAddress) {
   const credentialToStore = {
     credentialID: credential.credentialID instanceof Buffer || credential.credentialID instanceof Uint8Array
       ? base64url.encode(credential.credentialID) 
@@ -65,10 +68,21 @@ async function addCredential(userId, credential) {
       : credential.credentialPublicKey,
   };
 
-  await runQuery(
-    'INSERT INTO credentials (user_id, credential_id, public_key, counter) VALUES (?, ?, ?, ?)',
-    [userId, credentialToStore.credentialID, credentialToStore.credentialPublicKey, credential.counter || 0]
+  return runQuery(
+    'INSERT INTO credentials (user_id, credential_id, public_key, counter, device_info, last_used_ip) VALUES (?, ?, ?, ?, ?, ?)',
+    [userId, credentialToStore.credentialID, credentialToStore.credentialPublicKey, credential.counter || 0, deviceInfo, ipAddress]
   );
+}
+
+function updateCredentialUsage(credentialId, ipAddress, deviceInfo) {
+  return runQuery(
+    'UPDATE credentials SET last_used_ip = ?, last_used_at = CURRENT_TIMESTAMP, device_info = ? WHERE credential_id = ?',
+    [ipAddress, deviceInfo, credentialId]
+  );
+}
+
+function deleteCredential(credentialId) {
+  return runQuery('DELETE FROM credentials WHERE credential_id = ?', [credentialId]);
 }
 
 function getUserCredentials(userId) {
@@ -95,5 +109,7 @@ module.exports = {
   createUser,
   addCredential,
   getUserCredentials,
-  getAllUsers
+  getAllUsers,
+  updateCredentialUsage,
+  deleteCredential
 };
