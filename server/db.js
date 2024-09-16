@@ -11,17 +11,21 @@ function initDB() {
         reject(err);
       } else {
         console.log('Database opened');
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          username TEXT UNIQUE,
-          credential TEXT
-        )`, (err) => {
-          if (err) {
-            console.error('Error creating users table', err);
-            reject(err);
-          } else {
-            resolve();
-          }
+        db.serialize(() => {
+          db.run(`CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE
+          )`);
+          db.run(`CREATE TABLE IF NOT EXISTS credentials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            credential_id TEXT UNIQUE,
+            public_key TEXT,
+            counter INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+          )`);
+          resolve();
         });
       }
     });
@@ -46,32 +50,34 @@ function getUser(username) {
   });
 }
 
-async function saveUser(username, credential) {
-  // Helper function to check if an object is a Uint8Array or Buffer
-  const isUint8ArrayOrBuffer = (obj) => 
-    obj instanceof Uint8Array || obj instanceof Buffer;
+async function createUser(username) {
+  const result = await runQuery('INSERT INTO users (username) VALUES (?)', [username]);
+  return result.lastID;
+}
 
-  // Helper function to convert Uint8Array or Buffer to base64url string
-  const convertToBase64Url = (data) => 
-    base64url.encode(Buffer.from(data));
-
-  // Convert Uint8Array or Buffer objects to base64url strings for storage
+async function addCredential(userId, credential) {
   const credentialToStore = {
-    ...credential,
-    credentialID: isUint8ArrayOrBuffer(credential.credentialID)
-      ? convertToBase64Url(credential.credentialID)
+    credentialID: credential.credentialID instanceof Buffer || credential.credentialID instanceof Uint8Array
+      ? base64url.encode(credential.credentialID) 
       : credential.credentialID,
-    credentialPublicKey: isUint8ArrayOrBuffer(credential.credentialPublicKey)
-      ? convertToBase64Url(credential.credentialPublicKey)
+    credentialPublicKey: credential.credentialPublicKey instanceof Buffer || credential.credentialPublicKey instanceof Uint8Array
+      ? base64url.encode(credential.credentialPublicKey) 
       : credential.credentialPublicKey,
   };
 
-  const existingUser = await getUser(username);
-  if (existingUser) {
-    await runQuery('UPDATE users SET credential = ? WHERE username = ?', [JSON.stringify(credentialToStore), username]);
-  } else {
-    await runQuery('INSERT INTO users (username, credential) VALUES (?, ?)', [username, JSON.stringify(credentialToStore)]);
-  }
+  await runQuery(
+    'INSERT INTO credentials (user_id, credential_id, public_key, counter) VALUES (?, ?, ?, ?)',
+    [userId, credentialToStore.credentialID, credentialToStore.credentialPublicKey, credential.counter || 0]
+  );
+}
+
+function getUserCredentials(userId) {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT * FROM credentials WHERE user_id = ?', [userId], (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
 }
 
 function getAllUsers() {
@@ -86,6 +92,8 @@ function getAllUsers() {
 module.exports = {
   initDB,
   getUser,
-  saveUser,
+  createUser,
+  addCredential,
+  getUserCredentials,
   getAllUsers
 };

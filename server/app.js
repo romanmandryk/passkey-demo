@@ -3,7 +3,7 @@ const cors = require('cors');
 const session = require('express-session');
 const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const base64url = require('base64url');
-const { initDB, getUser, saveUser, getAllUsers } = require('./db');
+const { initDB, getUser, createUser, getUserCredentials, getAllUsers, addCredential } = require('./db');
 
 const app = express();
 
@@ -40,45 +40,49 @@ app.post('/register', async (req, res, next) => {
       return res.status(400).json({ error: 'Username is required' });
     }
 
-    const existingUser = await getUser(username);
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists' });
+    let user = await getUser(username);
+    let isNewUser = false;
+    if (!user) {
+      const userId = await createUser(username);
+      user = { id: userId, username };
+      isNewUser = true;
     }
 
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
+      //userID: user.id.toBuffer(),
       userName: username,
       attestationType: 'none',
     });
 
-    await saveUser(username, { currentChallenge: options.challenge });
+    req.session.challenge = options.challenge;
+    req.session.registrationUserId = user.id;
 
-    res.json(options);
+    res.json({ options, isNewUser });
   } catch (error) {
     next(error);
   }
 });
 
 app.post('/register-verify', async (req, res, next) => {
-  const username = req.body.username;
-  const user = await getUser(username);
-
-  if (!user) {
-    return res.status(400).json({ error: 'User not found' });
+  const userId = req.session.registrationUserId;
+  if (!userId) {
+    return res.status(400).json({ error: 'Registration session not found' });
   }
 
   try {
     const verification = await verifyRegistrationResponse({
       response: req.body,
-      expectedChallenge: req.session.challenge, // Use challenge from session
+      expectedChallenge: req.session.challenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
     });
 
     if (verification.verified) {
-      await saveUser(username, verification.registrationInfo);
-      delete req.session.challenge; // Clear the challenge from session
+      await addCredential(userId, verification.registrationInfo);
+      delete req.session.challenge;
+      delete req.session.registrationUserId;
       res.json({ success: true });
     } else {
       res.status(400).json({ error: 'Registration failed' });
@@ -92,54 +96,69 @@ app.post('/login', async (req, res) => {
   const username = req.body.username;
   const user = await getUser(username);
 
-  if (!user || !user.credential) {
-    return res.status(400).json({ error: 'User not found or not registered' });
+  if (!user) {
+    return res.status(400).json({ error: 'User not found' });
   }
 
-  const userCredential = JSON.parse(user.credential);
+  const userCredentials = await getUserCredentials(user.id);
 
+  if (userCredentials.length === 0) {
+    return res.status(400).json({ error: 'No credentials found for this user' });
+  }
   const options = await generateAuthenticationOptions({
     rpID,
-    allowCredentials: [{
-      id: userCredential.credentialID,
+    allowCredentials: userCredentials.map(cred => ({
+      id: cred.credential_id,
       type: 'public-key',
-    }],
+    })),
   });
 
-  req.session.challenge = options.challenge; // Store challenge in session
+  req.session.challenge = options.challenge;
+  req.session.username = username;
 
   res.json(options);
 });
 
 app.post('/login-verify', async (req, res) => {
-  const username = req.body.username;
+  const username = req.session.username;
   const user = await getUser(username);
 
   if (!user) {
     return res.status(400).json({ error: 'User not found' });
   }
 
+  const userCredentials = await getUserCredentials(user.id);
+
+  if (userCredentials.length === 0) {
+    return res.status(400).json({ error: 'No credentials found for this user' });
+  }
+
   try {
-    const userCredential = JSON.parse(user.credential);
-    
-    if (typeof userCredential.credentialID === 'string') {
-      userCredential.credentialID = base64url.toBuffer(userCredential.credentialID);
+    const credentialId = req.body.rawId;
+    const matchedCredential = userCredentials.find(cred => cred.credential_id === credentialId);
+
+    if (!matchedCredential) {
+      return res.status(400).json({ error: 'No matching credential found' });
     }
-    if (typeof userCredential.credentialPublicKey === 'string') {
-      userCredential.credentialPublicKey = base64url.toBuffer(userCredential.credentialPublicKey);
-    }
+
+    const authenticator = {
+      credentialID: base64url.toBuffer(matchedCredential.credential_id),
+      credentialPublicKey: base64url.toBuffer(matchedCredential.public_key),
+      counter: matchedCredential.counter,
+    };
 
     const verification = await verifyAuthenticationResponse({
       response: req.body,
-      expectedChallenge: req.session.challenge, // Use challenge from session
+      expectedChallenge: req.session.challenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      authenticator: userCredential,
+      authenticator,
     });
 
     if (verification.verified) {
       req.session.currentUser = username;
-      delete req.session.challenge; // Clear the challenge from session
+      delete req.session.challenge;
+      delete req.session.username;
       res.json({ success: true });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
@@ -156,7 +175,7 @@ app.post('/login-options', async (req, res) => {
       rpID,
     });
 
-    req.session.challenge = options.challenge; // Store challenge in session
+    req.session.challenge = options.challenge;
 
     res.json(options);
   } catch (error) {
@@ -168,14 +187,16 @@ app.post('/login-verify-without-username', async (req, res) => {
   try {
     const { id, rawId, response, type } = req.body;
 
+    const users = await getAllUsers();
     let foundUser = null;
     let foundCredential = null;
-    const users = await getAllUsers();
+
     for (const user of users) {
-      const userCredential = JSON.parse(user.credential);
-      if (userCredential.credentialID === rawId) {
+      const userCredentials = await getUserCredentials(user.id);
+      foundCredential = userCredentials.find(cred => cred.credential_id === rawId);
+      console.log('foundCredential', rawId,foundCredential);
+      if (foundCredential) {
         foundUser = user;
-        foundCredential = userCredential;
         break;
       }
     }
@@ -184,24 +205,23 @@ app.post('/login-verify-without-username', async (req, res) => {
       return res.status(400).json({ error: 'User not found' });
     }
 
-    if (typeof foundCredential.credentialID === 'string') {
-      foundCredential.credentialID = base64url.toBuffer(foundCredential.credentialID);
-    }
-    if (typeof foundCredential.credentialPublicKey === 'string') {
-      foundCredential.credentialPublicKey = base64url.toBuffer(foundCredential.credentialPublicKey);
-    }
+    const authenticator = {
+      credentialID: base64url.toBuffer(foundCredential.credential_id),
+      credentialPublicKey: base64url.toBuffer(foundCredential.public_key),
+      counter: foundCredential.counter,
+    };
 
     const verification = await verifyAuthenticationResponse({
       response: req.body,
-      expectedChallenge: req.session.challenge, // Use challenge from session
+      expectedChallenge: req.session.challenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      authenticator: foundCredential,
+      authenticator,
     });
 
     if (verification.verified) {
       req.session.currentUser = foundUser.username;
-      delete req.session.challenge; // Clear the challenge from session
+      delete req.session.challenge;
       res.json({ success: true, username: foundUser.username });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
@@ -226,6 +246,24 @@ app.get('/user', (req, res) => {
     res.json({ username: req.session.currentUser });
   } else {
     res.status(401).json({ error: 'Not logged in' });
+  }
+});
+
+app.get('/user-credentials', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  try {
+    const user = await getUser(req.session.currentUser);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const credentials = await getUserCredentials(user.id);
+    res.json(credentials);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user credentials' });
   }
 });
 

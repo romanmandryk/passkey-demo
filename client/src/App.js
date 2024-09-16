@@ -1,66 +1,75 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ToastContainer, toast } from 'react-toastify';
+import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import SHA256 from 'crypto-js/sha256';
 import './App.css';
+import { SHA256 } from 'crypto-js';
+import base64url from 'base64url';
 
-const BACKEND_URL = 'http://localhost:3001'; // Change this to your backend URL
-
+const BACKEND_URL = 'http://localhost:3001';
 axios.defaults.withCredentials = true;
+// Helper function to convert base64url to ArrayBuffer
+const base64urlToArrayBuffer = (base64url) => {
+  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+// Helper function to convert ArrayBuffer to base64url
+const arrayBufferToBase64url = (buffer) => {
+  const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)));
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+};
+
+
 function App() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [loginUsername, setLoginUsername] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
+  const [userCredentials, setUserCredentials] = useState([]);
 
   useEffect(() => {
-    checkUser();
+    checkCurrentUser();
   }, []);
 
-  const checkUser = async () => {
+  useEffect(() => {
+    if (currentUser) {
+      fetchUserCredentials();
+    }
+  }, [currentUser]);
+
+  const checkCurrentUser = async () => {
     try {
-      const response = await axios.get(`${BACKEND_URL}/user`);
+      const response = await axios.get(`${BACKEND_URL}/user`, { withCredentials: true });
       setCurrentUser(response.data.username);
     } catch (error) {
-      console.error('Error checking user:', error);
+      console.error('Error checking current user:', error);
     }
   };
 
-  // Helper function to convert base64url to ArrayBuffer
-  const base64urlToArrayBuffer = (base64url) => {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-    const binaryString = window.atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+  const fetchUserCredentials = async () => {
+    try {
+      const response = await axios.get(`${BACKEND_URL}/user-credentials`, { withCredentials: true });
+      setUserCredentials(response.data);
+    } catch (error) {
+      console.error('Error fetching user credentials:', error);
     }
-    return bytes.buffer;
-  };
-
-  // Helper function to convert ArrayBuffer to base64url
-  const arrayBufferToBase64url = (buffer) => {
-    const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)));
-    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   };
 
   const register = async () => {
     try {
       const response = await axios.post(`${BACKEND_URL}/register`, { username: registerUsername });
-      const publicKey = response.data;
+      const { options, isNewUser } = response.data;
 
-      // Convert challenge to ArrayBuffer
-      publicKey.challenge = base64urlToArrayBuffer(publicKey.challenge);
+      options.challenge = base64urlToArrayBuffer(options.challenge);
+      options.user.id = base64urlToArrayBuffer(options.user.id);
 
-      // Generate a 32-byte buffer from the username
-      const userIdHash = SHA256(registerUsername).toString();
-      const userIdBuffer = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        userIdBuffer[i] = parseInt(userIdHash.substr(i * 2, 2), 16);
-      }
-      publicKey.user.id = userIdBuffer;
-
-      const credential = await navigator.credentials.create({ publicKey });
+      const credential = await navigator.credentials.create({ publicKey: options });
 
       const attestationResponse = {
         id: credential.id,
@@ -72,8 +81,9 @@ function App() {
         type: credential.type,
       };
 
-      await axios.post(`${BACKEND_URL}/register-verify`, { ...attestationResponse, username: registerUsername });
-      toast.success('Registration successful');
+      await axios.post(`${BACKEND_URL}/register-verify`, attestationResponse, { withCredentials: true });
+      toast.success(isNewUser ? 'Registration successful' : 'New credential added successfully');
+      checkCurrentUser();
     } catch (error) {
       console.error('Error during registration:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Registration failed';
@@ -106,9 +116,9 @@ function App() {
         type: credential.type,
       };
 
-      await axios.post(`${BACKEND_URL}/login-verify`, { ...assertionResponse, username: loginUsername });
+      await axios.post(`${BACKEND_URL}/login-verify`, { ...assertionResponse, username: loginUsername }, { withCredentials: true });
       toast.success('Login successful');
-      checkUser();
+      checkCurrentUser();
     } catch (error) {
       console.error('Error during login:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Login failed';
@@ -143,7 +153,7 @@ function App() {
         type: credential.type,
       };
 
-      const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse);
+      const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse, { withCredentials: true });
       setCurrentUser(verifyResponse.data.username);
       toast.success('Login successful');
     } catch (error) {
@@ -155,8 +165,9 @@ function App() {
 
   const logout = async () => {
     try {
-      await axios.post(`${BACKEND_URL}/logout`);
+      await axios.post(`${BACKEND_URL}/logout`, {}, { withCredentials: true });
       setCurrentUser(null);
+      setUserCredentials([]);
       toast.success('Logout successful');
     } catch (error) {
       console.error('Error during logout:', error);
@@ -166,12 +177,29 @@ function App() {
 
   return (
     <div className="App">
-      <ToastContainer position="top-right" autoClose={5000} hideProgressBar={false} />
-      <h1>Passkey Demo</h1>
+      <h1>Passkey Authentication Demo</h1>
+      <ToastContainer />
       {currentUser ? (
         <div className="logged-in">
-          <p>Logged in as: <strong>{currentUser}</strong></p>
+          <h2>Welcome, {currentUser}!</h2>
           <button onClick={logout}>Logout</button>
+          <h3>Your Credentials</h3>
+          <table className="credentials-table">
+            <thead>
+              <tr>
+                <th>Credential ID</th>
+                <th>Created At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {userCredentials.map((cred) => (
+                <tr key={cred.id}>
+                  <td>{cred.credential_id.substr(0, 16)}...</td>
+                  <td>{new Date(cred.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="auth-container">
