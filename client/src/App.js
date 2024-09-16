@@ -7,6 +7,7 @@ import './App.css';
 
 const BACKEND_URL = 'http://localhost:3001'; // Change this to your backend URL
 
+axios.defaults.withCredentials = true;
 function App() {
   const [registerUsername, setRegisterUsername] = useState('');
   const [loginUsername, setLoginUsername] = useState('');
