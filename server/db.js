@@ -74,15 +74,6 @@ async function saveUser(username, credential) {
   }
 }
 
-async function updateUserChallenge(username, challenge) {
-  const user = await getUser(username);
-  if (user) {
-    const credential = JSON.parse(user.credential);
-    credential.currentChallenge = challenge;
-    await runQuery('UPDATE users SET credential = ? WHERE username = ?', [JSON.stringify(credential), username]);
-  }
-}
-
 function getAllUsers() {
   return new Promise((resolve, reject) => {
     db.all('SELECT * FROM users', (err, rows) => {
@@ -96,6 +87,5 @@ module.exports = {
   initDB,
   getUser,
   saveUser,
-  updateUserChallenge,
   getAllUsers
 };

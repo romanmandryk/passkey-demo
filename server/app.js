@@ -3,25 +3,22 @@ const cors = require('cors');
 const session = require('express-session');
 const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const base64url = require('base64url');
-const { initDB, getUser, saveUser, updateUserChallenge, getAllUsers } = require('./db');
+const { initDB, getUser, saveUser, getAllUsers } = require('./db');
 
 const app = express();
 
-// CORS middleware should come first
 app.use(cors({
   origin: 'http://localhost:3000',
   credentials: true
 }));
 
-// Body parsing middleware should come before session middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session middleware
 app.use(session({
   secret: 'your-secret-key', // Replace with a strong, unique secret
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: true,
   cookie: { 
     secure: false, // Set to true if using https
     httpOnly: true,
@@ -72,16 +69,16 @@ app.post('/register-verify', async (req, res, next) => {
   }
 
   try {
-    const userCredential = JSON.parse(user.credential);
     const verification = await verifyRegistrationResponse({
       response: req.body,
-      expectedChallenge: userCredential.currentChallenge,
+      expectedChallenge: req.session.challenge, // Use challenge from session
       expectedOrigin: origin,
       expectedRPID: rpID,
     });
 
     if (verification.verified) {
       await saveUser(username, verification.registrationInfo);
+      delete req.session.challenge; // Clear the challenge from session
       res.json({ success: true });
     } else {
       res.status(400).json({ error: 'Registration failed' });
@@ -109,7 +106,7 @@ app.post('/login', async (req, res) => {
     }],
   });
 
-  await updateUserChallenge(username, options.challenge);
+  req.session.challenge = options.challenge; // Store challenge in session
 
   res.json(options);
 });
@@ -125,19 +122,16 @@ app.post('/login-verify', async (req, res) => {
   try {
     const userCredential = JSON.parse(user.credential);
     
-    // Ensure the credentialID is in the correct format
     if (typeof userCredential.credentialID === 'string') {
       userCredential.credentialID = base64url.toBuffer(userCredential.credentialID);
     }
-
-    // Ensure the credentialPublicKey is in the correct format
     if (typeof userCredential.credentialPublicKey === 'string') {
       userCredential.credentialPublicKey = base64url.toBuffer(userCredential.credentialPublicKey);
     }
 
     const verification = await verifyAuthenticationResponse({
       response: req.body,
-      expectedChallenge: userCredential.currentChallenge,
+      expectedChallenge: req.session.challenge, // Use challenge from session
       expectedOrigin: origin,
       expectedRPID: rpID,
       authenticator: userCredential,
@@ -145,13 +139,8 @@ app.post('/login-verify', async (req, res) => {
 
     if (verification.verified) {
       req.session.currentUser = username;
-      req.session.save(err => {
-        if (err) {
-          console.error('Error saving session:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-        res.json({ success: true });
-      });
+      delete req.session.challenge; // Clear the challenge from session
+      res.json({ success: true });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
     }
@@ -165,14 +154,9 @@ app.post('/login-options', async (req, res) => {
   try {
     const options = await generateAuthenticationOptions({
       rpID,
-      // Don't specify allowCredentials to allow selection from all registered credentials
     });
 
-    // Store the challenge for all users
-    const users = await getAllUsers();
-    for (const user of users) {
-      await updateUserChallenge(user.username, options.challenge);
-    }
+    req.session.challenge = options.challenge; // Store challenge in session
 
     res.json(options);
   } catch (error) {
@@ -184,7 +168,6 @@ app.post('/login-verify-without-username', async (req, res) => {
   try {
     const { id, rawId, response, type } = req.body;
 
-    // Find the user based on the credential ID
     let foundUser = null;
     let foundCredential = null;
     const users = await getAllUsers();
@@ -201,7 +184,6 @@ app.post('/login-verify-without-username', async (req, res) => {
       return res.status(400).json({ error: 'User not found' });
     }
 
-    // Ensure the credentialID and credentialPublicKey are in the correct format
     if (typeof foundCredential.credentialID === 'string') {
       foundCredential.credentialID = base64url.toBuffer(foundCredential.credentialID);
     }
@@ -211,7 +193,7 @@ app.post('/login-verify-without-username', async (req, res) => {
 
     const verification = await verifyAuthenticationResponse({
       response: req.body,
-      expectedChallenge: foundCredential.currentChallenge,
+      expectedChallenge: req.session.challenge, // Use challenge from session
       expectedOrigin: origin,
       expectedRPID: rpID,
       authenticator: foundCredential,
@@ -219,13 +201,8 @@ app.post('/login-verify-without-username', async (req, res) => {
 
     if (verification.verified) {
       req.session.currentUser = foundUser.username;
-      req.session.save(err => {
-        if (err) {
-          console.error('Error saving session:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-        res.json({ success: true, username: foundUser.username });
-      });
+      delete req.session.challenge; // Clear the challenge from session
+      res.json({ success: true, username: foundUser.username });
     } else {
       res.status(400).json({ error: 'Authentication failed' });
     }
