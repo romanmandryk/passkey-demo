@@ -3,6 +3,7 @@ import axios from 'axios';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useTable, useSortBy, usePagination } from 'react-table';
+import { FaTrash } from 'react-icons/fa';
 import Modal from './Modal';
 import './App.css';
 
@@ -106,7 +107,7 @@ function App() {
       {
         Header: 'Credential ID',
         accessor: 'credential_id',
-        Cell: ({ value }) => value.substr(0, 16) + '...'
+        Cell: ({ value }) => <span title={value}>{value.substr(0, 8)}...</span>
       },
       {
         Header: 'Authenticator',
@@ -115,13 +116,18 @@ function App() {
       {
         Header: 'Device',
         accessor: 'device_info',
+        Cell: ({ value }) => (
+          <div className="device-info" title={value}>
+            {value.split(' ').slice(0, 3).join(' ')}...
+          </div>
+        )
       },
       {
         Header: 'Last Used IP',
         accessor: 'last_used_ip',
       },
       {
-        Header: 'Last Used At',
+        Header: 'Last used at',
         accessor: 'last_used_at',
         Cell: ({ value }) => new Date(value).toLocaleString()
       },
@@ -129,7 +135,7 @@ function App() {
         Header: 'Action',
         Cell: ({ row }) => (
           <button onClick={() => openDeleteModal(row.original.credential_id)} className="delete-btn">
-            Delete
+            <FaTrash />
           </button>
         )
       }
@@ -283,82 +289,86 @@ function App() {
         <div className="logged-in">
           <h2>Welcome, {currentUser}!</h2>
           <button onClick={logout}>Logout</button>
-          <h3>Your Credentials</h3>
-          <table {...getTableProps()} className="credentials-table">
-            <thead>
-              {headerGroups.map(headerGroup => (
-                <tr {...headerGroup.getHeaderGroupProps()}>
-                  {headerGroup.headers.map(column => (
-                    <th {...column.getHeaderProps(column.getSortByToggleProps())}>
-                      {column.render('Header')}
-                      <span>
-                        {column.isSorted
-                          ? column.isSortedDesc
-                            ? ' 🔽'
-                            : ' 🔼'
-                          : ''}
-                      </span>
-                    </th>
+          <div className="credentials-table">
+            <h2>Your Passkeys</h2>
+            <div className="table-container">
+              <table {...getTableProps()} className="modern-table">
+                <thead>
+                  {headerGroups.map(headerGroup => (
+                    <tr {...headerGroup.getHeaderGroupProps()}>
+                      {headerGroup.headers.map(column => (
+                        <th {...column.getHeaderProps(column.getSortByToggleProps())}>
+                          {column.render('Header')}
+                          <span>
+                            {column.isSorted
+                              ? column.isSortedDesc
+                                ? ' 🔽'
+                                : ' 🔼'
+                              : ''}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
-              ))}
-            </thead>
-            <tbody {...getTableBodyProps()}>
-              {page.map((row, i) => {
-                prepareRow(row)
-                return (
-                  <tr {...row.getRowProps()}>
-                    {row.cells.map(cell => {
-                      return <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
-                    })}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <div className="pagination">
-            <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
-              {'<<'}
-            </button>{' '}
-            <button onClick={() => previousPage()} disabled={!canPreviousPage}>
-              {'<'}
-            </button>{' '}
-            <button onClick={() => nextPage()} disabled={!canNextPage}>
-              {'>'}
-            </button>{' '}
-            <button onClick={() => gotoPage(pageCount - 1)} disabled={!canNextPage}>
-              {'>>'}
-            </button>{' '}
-            <span>
-              Page{' '}
-              <strong>
-                {pageIndex + 1} of {pageOptions.length}
-              </strong>{' '}
-            </span>
-            <span>
-              | Go to page:{' '}
-              <input
-                type="number"
-                defaultValue={pageIndex + 1}
+                </thead>
+                <tbody {...getTableBodyProps()}>
+                  {page.map(row => {
+                    prepareRow(row);
+                    return (
+                      <tr {...row.getRowProps()}>
+                        {row.cells.map(cell => (
+                          <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="pagination">
+              <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
+                {'<<'}
+              </button>{' '}
+              <button onClick={() => previousPage()} disabled={!canPreviousPage}>
+                {'<'}
+              </button>{' '}
+              <button onClick={() => nextPage()} disabled={!canNextPage}>
+                {'>'}
+              </button>{' '}
+              <button onClick={() => gotoPage(pageCount - 1)} disabled={!canNextPage}>
+                {'>>'}
+              </button>{' '}
+              <span>
+                Page{' '}
+                <strong>
+                  {pageIndex + 1} of {pageOptions.length}
+                </strong>{' '}
+              </span>
+              <span>
+                | Go to page:{' '}
+                <input
+                  type="number"
+                  defaultValue={pageIndex + 1}
+                  onChange={e => {
+                    const page = e.target.value ? Number(e.target.value) - 1 : 0
+                    gotoPage(page)
+                  }}
+                  style={{ width: '50px' }}
+                />
+              </span>{' '}
+              <select
+                value={pageSize}
                 onChange={e => {
-                  const page = e.target.value ? Number(e.target.value) - 1 : 0
-                  gotoPage(page)
+                  setPageSize(Number(e.target.value))
                 }}
-                style={{ width: '50px' }}
-              />
-            </span>{' '}
-            <select
-              value={pageSize}
-              onChange={e => {
-                setPageSize(Number(e.target.value))
-              }}
-            >
-              {[5, 10, 20].map(pageSize => (
-                <option key={pageSize} value={pageSize}>
-                  Show {pageSize}
-                </option>
-              ))}
-            </select>
+              >
+                {[5, 10, 20].map(pageSize => (
+                  <option key={pageSize} value={pageSize}>
+                    Show {pageSize}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       ) : (

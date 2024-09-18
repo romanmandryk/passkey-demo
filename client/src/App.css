@@ -87,63 +87,82 @@ button:hover {
 }
 
 .credentials-table {
+  margin-top: 2rem;
+  width: 100%;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.modern-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  margin-bottom: 1rem;
-  background-color: #fff;
-  border-radius: 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
 }
 
-.credentials-table th,
-.credentials-table td {
-  padding: 1rem;
+.modern-table th,
+.modern-table td {
+  padding: 12px 15px;
   text-align: left;
+  border-bottom: 1px solid #e0e0e0;
 }
 
-.credentials-table th {
-  background-color: #f8f9fa;
+.modern-table th {
+  background-color: #f5f5f5;
   font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #495057;
-  border-bottom: 2px solid #dee2e6;
+  text-transform: none;
+  font-size: 14px;
 }
 
-.credentials-table tr:nth-child(even) {
-  background-color: #f8f9fa;
-}
-
-.credentials-table tr:nth-child(odd) {
-  background-color: #ffffff;
-}
-
-.credentials-table tbody tr:hover {
-  background-color: #e9ecef;
-}
-
-.credentials-table td {
-  border-bottom: 1px solid #dee2e6;
-}
-
-.credentials-table tbody tr:last-child td {
+.modern-table tr:last-child td {
   border-bottom: none;
 }
 
+.modern-table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.device-info {
+  font-size: 12px;
+  line-height: 1.2;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .delete-btn {
-  background-color: #dc3545;
-  color: white;
+  background: none;
   border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 5px;
+  color: #ff4d4d;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  padding: 5px;
+  font-size: 16px;
 }
 
 .delete-btn:hover {
-  background-color: #c82333;
+  color: #ff0000;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .modern-table th,
+  .modern-table td {
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+
+  .device-info {
+    font-size: 11px;
+    max-width: 150px;
+  }
 }
 
 .pagination {
