@@ -25,10 +25,10 @@ function initDB() {
             device_info TEXT,
             last_used_ip TEXT,
             last_used_at DATETIME,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-          )`);
-          resolve();
+            authenticator_model TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )`);
+        resolve();
         });
       }
     });
@@ -58,7 +58,7 @@ async function createUser(username) {
   return result.lastID;
 }
 
-function addCredential(userId, credential, deviceInfo, ipAddress) {
+function addCredential(userId, credential, deviceInfo, ipAddress, authenticatorModel) {
   const credentialToStore = {
     credentialID: credential.credentialID instanceof Buffer || credential.credentialID instanceof Uint8Array
       ? base64url.encode(credential.credentialID) 
@@ -69,8 +69,8 @@ function addCredential(userId, credential, deviceInfo, ipAddress) {
   };
 
   return runQuery(
-    'INSERT INTO credentials (user_id, credential_id, public_key, counter, device_info, last_used_ip) VALUES (?, ?, ?, ?, ?, ?)',
-    [userId, credentialToStore.credentialID, credentialToStore.credentialPublicKey, credential.counter || 0, deviceInfo, ipAddress]
+    'INSERT INTO credentials (user_id, credential_id, public_key, counter, device_info, last_used_ip, authenticator_model) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [userId, credentialToStore.credentialID, credentialToStore.credentialPublicKey, credential.counter || 0, deviceInfo, ipAddress, authenticatorModel]
   );
 }
 
@@ -87,10 +87,18 @@ function deleteCredential(credentialId) {
 
 function getUserCredentials(userId) {
   return new Promise((resolve, reject) => {
-    db.all('SELECT * FROM credentials WHERE user_id = ?', [userId], (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
+    db.all(
+      `SELECT credential_id, public_key, counter, device_info, last_used_ip, last_used_at, authenticator_model 
+       FROM credentials WHERE user_id = ?`,
+      [userId],
+      (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows);
+        }
+      }
+    );
   });
 }
 

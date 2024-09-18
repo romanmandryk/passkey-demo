@@ -37,6 +37,9 @@ initDB().then(() => {
   
 });
 
+// Load the AAGUID mapping more efficiently
+const aaguidMap = require('./aaguid.json');
+
 app.post('/register', async (req, res, next) => {
   try {
     const username = req.body.username;
@@ -84,9 +87,12 @@ app.post('/register-verify', async (req, res, next) => {
     });
 
     if (verification.verified) {
+      const { aaguid } = verification.registrationInfo;
       const deviceInfo = req.headers['user-agent'] || 'Unknown device';
       const ipAddress = req.ip;
-      await addCredential(userId, verification.registrationInfo, deviceInfo, ipAddress);
+      const authenticatorModel = aaguidMap[aaguid]?.name || 'Unknown model';
+      
+      await addCredential(userId, verification.registrationInfo, deviceInfo, ipAddress, authenticatorModel);
       delete req.session.challenge;
       delete req.session.registrationUserId;
       res.json({ success: true });
@@ -127,8 +133,7 @@ app.post('/login', async (req, res) => {
 
 app.post('/login-verify', async (req, res) => {
   const username = req.session.username;
-  const user = await getUser(username);
-
+  const user = await getUser(username);  
   if (!user) {
     return res.status(400).json({ error: 'User not found' });
   }
@@ -194,7 +199,6 @@ app.post('/login-options', async (req, res) => {
 app.post('/login-verify-without-username', async (req, res) => {
   try {
     const { id, rawId, response, type } = req.body;
-
     const users = await getAllUsers();
     let foundUser = null;
     let foundCredential = null;

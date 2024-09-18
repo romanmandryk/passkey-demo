@@ -34,14 +34,33 @@ function App() {
   const [userCredentials, setUserCredentials] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [credentialToDelete, setCredentialToDelete] = useState(null);
+  const [webAuthnSupported, setWebAuthnSupported] = useState(false);
 
   const checkCurrentUser = useCallback(async () => {
     try {
       const response = await axios.get(`${BACKEND_URL}/user`);
-      setCurrentUser(response.data.username);
+      if (response.data && response.data.username) {
+        setCurrentUser(response.data.username);
+      } else {
+        setCurrentUser(null);
+      }
     } catch (error) {
-      console.error('Error checking current user:', error);
+      if (error.response && error.response.status === 401) {
+        // User is not logged in, this is expected
+        setCurrentUser(null);
+      } else {
+        // Log other unexpected errors
+        console.error('Error checking current user:', error);
+      }
     }
+  }, []);
+
+  useEffect(() => {
+    checkCurrentUser();
+  }, [checkCurrentUser]);
+
+  useEffect(() => {
+    setWebAuthnSupported(!!window.PublicKeyCredential);
   }, []);
 
   const fetchUserCredentials = useCallback(async () => {
@@ -53,10 +72,6 @@ function App() {
       console.error('Error fetching user credentials:', error);
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    checkCurrentUser();
-  }, [checkCurrentUser]);
 
   useEffect(() => {
     fetchUserCredentials();
@@ -92,6 +107,10 @@ function App() {
         Header: 'Credential ID',
         accessor: 'credential_id',
         Cell: ({ value }) => value.substr(0, 16) + '...'
+      },
+      {
+        Header: 'Authenticator',
+        accessor: 'authenticator_model',
       },
       {
         Header: 'Device',
@@ -212,7 +231,6 @@ function App() {
     try {
       const response = await axios.post(`${BACKEND_URL}/login-options`);
       const publicKey = response.data;
-
       publicKey.challenge = base64urlToArrayBuffer(publicKey.challenge);
       if (publicKey.allowCredentials) {
         publicKey.allowCredentials = publicKey.allowCredentials.map(cred => ({
@@ -222,7 +240,6 @@ function App() {
       }
 
       const credential = await navigator.credentials.get({ publicKey });
-
       const assertionResponse = {
         id: credential.id,
         rawId: arrayBufferToBase64url(credential.rawId),
@@ -238,6 +255,7 @@ function App() {
       const verifyResponse = await axios.post(`${BACKEND_URL}/login-verify-without-username`, assertionResponse);
       setCurrentUser(verifyResponse.data.username);
       toast.success('Login successful');
+      checkCurrentUser();
     } catch (error) {
       console.error('Error during login without username:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Login failed';
