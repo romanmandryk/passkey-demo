@@ -1,6 +1,6 @@
 # Passkey Authentication Demo
 
-This project demonstrates a basic implementation of passkey-based authentication using a Node.js backend and a React frontend. It allows users to register, login, and logout using passkeys (WebAuthn).
+This project demonstrates a basic implementation of passkey-based authentication using a Node.js backend and a React frontend. It allows users to register, login, and logout using passkeys (WebAuthn), as well as manage Ethereum wallets.
 
 ![Screenshot of the Passkey Demo](client/public/screen.png)
 
@@ -16,11 +16,14 @@ This project demonstrates a basic implementation of passkey-based authentication
 - User logout
 - Display of currently logged-in user
 - Modern, user-friendly interface with explanations of the passkey process
+- Ethereum wallet management (add, verify, and delete wallets)
 
 ## Prerequisites
 
 - Node.js (v18 or later recommended)
 - npm (comes with Node.js)
+- Write access to the filesystem (for SQLite database)
+- .env file with required properties (see below)
 
 ## Installation
 
@@ -35,6 +38,12 @@ This project demonstrates a basic implementation of passkey-based authentication
    ```
    npm install
    ```
+
+3. Create a `.env` file in the server directory with the following content:
+   ```
+   ENCRYPTION_KEY=your_very_long_and_random_string_here
+   ```
+   Replace `your_very_long_and_random_string_here` with a strong, random string for encrypting sensitive data.
 
 ### Client Setup
 
@@ -84,11 +93,19 @@ This project demonstrates a basic implementation of passkey-based authentication
 1. Open your web browser and go to `http://localhost:3000`
 2. Use the interface to register a new user with a passkey
 3. Log in using the registered passkey (with or without username)
-4. Log out when finished
+4. Add and verify Ethereum wallets
+5. Log out when finished
 
-## Note
+## Important Notes
 
-This is a demonstration project and should not be used in production without further security enhancements and thorough testing.
+- Ensure that the application has write access to the filesystem where it's running. This is necessary for the SQLite database to function correctly.
+- The `.env` file in the server directory is crucial for the application to run properly. Make sure it contains the `ENCRYPTION_KEY` with a strong, random value.
+- This is a demonstration project and should not be used in production without further security enhancements and thorough testing.
+
+## Troubleshooting
+
+- If you encounter database-related errors, ensure that the application has write permissions in the directory where it's running.
+- If you see encryption-related errors, double-check that the `.env` file exists in the server directory and contains a valid `ENCRYPTION_KEY`.
 
 ## License
 

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useTable, useSortBy, usePagination } from 'react-table';
-import { FaTrash } from 'react-icons/fa';
+import { FaTrash, FaCheck } from 'react-icons/fa';
 import Modal from './Modal';
 import './App.css';
 
@@ -36,6 +36,9 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [credentialToDelete, setCredentialToDelete] = useState(null);
   const [webAuthnSupported, setWebAuthnSupported] = useState(false);
+  const [ethereumWallets, setEthereumWallets] = useState([]);
+  const [newWallet, setNewWallet] = useState({ address: '', privateKey: '', alias: '' });
+  const [isAddWalletModalOpen, setIsAddWalletModalOpen] = useState(false);
 
   const checkCurrentUser = useCallback(async () => {
     try {
@@ -281,6 +284,114 @@ function App() {
     }
   };
 
+  const fetchEthereumWallets = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const response = await axios.get(`${BACKEND_URL}/ethereum-wallets`);
+      setEthereumWallets(response.data);
+    } catch (error) {
+      console.error('Error fetching Ethereum wallets:', error);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    fetchEthereumWallets();
+  }, [fetchEthereumWallets]);
+
+  const addEthereumWallet = async () => {
+    try {
+      await axios.post(`${BACKEND_URL}/add-ethereum-wallet`, newWallet);
+      toast.success('Ethereum wallet added successfully');
+      setIsAddWalletModalOpen(false);
+      setNewWallet({ address: '', privateKey: '', alias: '' });
+      fetchEthereumWallets();
+    } catch (error) {
+      console.error('Error adding Ethereum wallet:', error);
+      toast.error('Failed to add Ethereum wallet');
+    }
+  };
+
+  const deleteEthereumWallet = async (walletId) => {
+    try {
+      await axios.delete(`${BACKEND_URL}/ethereum-wallet/${walletId}`);
+      toast.success('Ethereum wallet deleted successfully');
+      fetchEthereumWallets();
+    } catch (error) {
+      console.error('Error deleting Ethereum wallet:', error);
+      toast.error('Failed to delete Ethereum wallet');
+    }
+  };
+
+  const verifyEthereumWallet = async (walletId) => {
+    try {
+      const response = await axios.post(`${BACKEND_URL}/verify-ethereum-wallet`, { walletId });
+      if (response.data.verified) {
+        toast.success('Ethereum wallet verified successfully');
+        setEthereumWallets(prevWallets => 
+          prevWallets.map(wallet => 
+            wallet.id === walletId ? { ...wallet, is_verified: true } : wallet
+          )
+        );
+      } else {
+        toast.error('Ethereum wallet verification failed');
+      }
+    } catch (error) {
+      console.error('Error verifying Ethereum wallet:', error);
+      toast.error('Failed to verify Ethereum wallet');
+    }
+  };
+
+  const ethereumWalletColumns = useMemo(
+    () => [
+      {
+        Header: 'Address',
+        accessor: 'address',
+        Cell: ({ value }) => <span title={value}>{value.substr(0, 10)}...</span>
+      },
+      {
+        Header: 'Alias',
+        accessor: 'alias',
+      },
+      {
+        Header: 'Verified',
+        accessor: 'is_verified',
+        Cell: ({ value }) => (value ? '✅' : '❌')
+      },
+      {
+        Header: 'Actions',
+        Cell: ({ row }) => (
+          <>
+            {!row.original.is_verified && (
+              <button onClick={() => verifyEthereumWallet(row.original.id)} className="verify-btn">
+                <FaCheck />
+              </button>
+            )}
+            <button onClick={() => deleteEthereumWallet(row.original.id)} className="delete-btn">
+              <FaTrash />
+            </button>
+          </>
+        )
+      }
+    ],
+    []
+  );
+
+  const {
+    getTableProps: getEthereumTableProps,
+    getTableBodyProps: getEthereumTableBodyProps,
+    headerGroups: ethereumHeaderGroups,
+    prepareRow: prepareEthereumRow,
+    page: ethereumPage,
+  } = useTable(
+    {
+      columns: ethereumWalletColumns,
+      data: ethereumWallets,
+      initialState: { pageIndex: 0, pageSize: 5 },
+    },
+    useSortBy,
+    usePagination
+  );
+
   return (
     <div className="App">
       <h1>Passkey Authentication Demo</h1>
@@ -289,6 +400,48 @@ function App() {
         <div className="logged-in">
           <h2>Welcome, {currentUser}!</h2>
           <button onClick={logout}>Logout</button>
+          
+          {/* Ethereum Wallets Section */}
+          <div className="ethereum-wallets">
+            <h2>Your Ethereum Wallets</h2>
+            <button onClick={() => setIsAddWalletModalOpen(true)}>Add Wallet</button>
+            <div className="table-container">
+              <table {...getEthereumTableProps()} className="modern-table">
+                <thead>
+                  {ethereumHeaderGroups.map(headerGroup => (
+                    <tr {...headerGroup.getHeaderGroupProps()}>
+                      {headerGroup.headers.map(column => (
+                        <th {...column.getHeaderProps(column.getSortByToggleProps())}>
+                          {column.render('Header')}
+                          <span>
+                            {column.isSorted
+                              ? column.isSortedDesc
+                                ? ' 🔽'
+                                : ' 🔼'
+                              : ''}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  ))}
+                </thead>
+                <tbody {...getEthereumTableBodyProps()}>
+                  {ethereumPage.map(row => {
+                    prepareEthereumRow(row);
+                    return (
+                      <tr {...row.getRowProps()}>
+                        {row.cells.map(cell => (
+                          <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Existing Passkeys Section */}
           <div className="credentials-table">
             <h2>Your Passkeys</h2>
             <div className="table-container">
@@ -429,6 +582,36 @@ function App() {
         onConfirm={confirmDelete}
         title="Confirm Deletion"
         message="Are you sure you want to delete this passkey? This will remove the passkey from the server, but it will still be kept in your passkey manager. You may need to remove it manually from your device if you no longer wish to use it."
+      />
+
+      {/* New Modal for adding Ethereum wallets */}
+      <Modal
+        isOpen={isAddWalletModalOpen}
+        onClose={() => setIsAddWalletModalOpen(false)}
+        onConfirm={addEthereumWallet}
+        title="Add Ethereum Wallet"
+        message={
+          <div>
+            <input
+              type="text"
+              placeholder="Address"
+              value={newWallet.address}
+              onChange={(e) => setNewWallet({ ...newWallet, address: e.target.value })}
+            />
+            <input
+              type="password"
+              placeholder="Private Key"
+              value={newWallet.privateKey}
+              onChange={(e) => setNewWallet({ ...newWallet, privateKey: e.target.value })}
+            />
+            <input
+              type="text"
+              placeholder="Alias (optional)"
+              value={newWallet.alias}
+              onChange={(e) => setNewWallet({ ...newWallet, alias: e.target.value })}
+            />
+          </div>
+        }
       />
     </div>
   );

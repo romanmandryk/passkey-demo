@@ -1,9 +1,13 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 const { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } = require('@simplewebauthn/server');
 const base64url = require('base64url');
-const { initDB, getUser, createUser, addCredential, getUserCredentials, getAllUsers, updateCredentialUsage, deleteCredential } = require('./db');
+const { initDB, getUser, createUser, addCredential, getUserCredentials, getAllUsers, updateCredentialUsage, deleteCredential, addEthereumWallet, getEthereumWallets, deleteEthereumWallet, verifyEthereumWallet } = require('./db');
+const { ethers } = require('ethers');
+const crypto = require('crypto');
 
 const app = express();
 
@@ -305,6 +309,139 @@ app.delete('/credential/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete credential' });
+  }
+});
+
+// Add this function to encrypt the private key
+function encryptPrivateKey(privateKey, encryptionKey) {
+  // Ensure the encryption key is 32 bytes long
+  const key = crypto.createHash('sha256').update(String(encryptionKey)).digest('base64').substr(0, 32);
+  
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(key), iv);
+  let encrypted = cipher.update(privateKey);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+// Add this function to decrypt the private key
+function decryptPrivateKey(encryptedPrivateKey, encryptionKey) {
+  // Ensure the encryption key is 32 bytes long
+  const key = crypto.createHash('sha256').update(String(encryptionKey)).digest('base64').substr(0, 32);
+  
+  const textParts = encryptedPrivateKey.split(':');
+  const iv = Buffer.from(textParts.shift(), 'hex');
+  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key), iv);
+  let decrypted = decipher.update(encryptedText);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
+}
+
+// Add a new Ethereum wallet
+app.post('/add-ethereum-wallet', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  const { address, privateKey, alias } = req.body;
+  const encryptionKey = process.env.ENCRYPTION_KEY;
+
+  if (!encryptionKey) {
+    console.error('ENCRYPTION_KEY is not set in the environment variables');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  try {
+    const user = await getUser(req.session.currentUser);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const encryptedPrivateKey = encryptPrivateKey(privateKey, encryptionKey);
+    await addEthereumWallet(user.id, address, encryptedPrivateKey, alias);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error adding Ethereum wallet:', error);
+    res.status(500).json({ error: 'Failed to add Ethereum wallet', details: error.message });
+  }
+});
+
+// Get Ethereum wallets for the current user
+app.get('/ethereum-wallets', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  try {
+    const user = await getUser(req.session.currentUser);
+    const wallets = await getEthereumWallets(user.id);
+    res.json(wallets);
+  } catch (error) {
+    console.error('Error fetching Ethereum wallets:', error);
+    res.status(500).json({ error: 'Failed to fetch Ethereum wallets' });
+  }
+});
+
+// Delete an Ethereum wallet
+app.delete('/ethereum-wallet/:id', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  const walletId = req.params.id;
+  try {
+    const user = await getUser(req.session.currentUser);
+    await deleteEthereumWallet(user.id, walletId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete Ethereum wallet' });
+  }
+});
+
+// Verify an Ethereum wallet
+app.post('/verify-ethereum-wallet', async (req, res) => {
+  if (!req.session.currentUser) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+
+  const { walletId } = req.body;
+  const encryptionKey = process.env.ENCRYPTION_KEY;
+
+  if (!encryptionKey) {
+    console.error('ENCRYPTION_KEY is not set in the environment variables');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  try {
+    const user = await getUser(req.session.currentUser);
+    const wallet = await getEthereumWallets(user.id, walletId);
+    
+    if (!wallet) {
+      return res.status(404).json({ error: 'Wallet not found' });
+    }
+
+    if (!wallet.private_key) {
+      return res.status(400).json({ error: 'Wallet private key is missing' });
+    }
+
+    const decryptedPrivateKey = decryptPrivateKey(wallet.private_key, encryptionKey);
+    const ethWallet = new ethers.Wallet(decryptedPrivateKey);
+    const message = "Verify wallet ownership";
+    const signature = await ethWallet.signMessage(message);
+    
+    const recoveredAddress = ethers.verifyMessage(message, signature);
+
+    if (recoveredAddress.toLowerCase() === wallet.address.toLowerCase()) {
+      await verifyEthereumWallet(walletId);
+      const updatedWallet = await getEthereumWallets(user.id, walletId);
+      res.json({ success: true, verified: true, wallet: updatedWallet });
+    } else {
+      res.json({ success: true, verified: false });
+    }
+  } catch (error) {
+    console.error('Error verifying Ethereum wallet:', error);
+    res.status(500).json({ error: 'Failed to verify Ethereum wallet', details: error.message });
   }
 });
 
